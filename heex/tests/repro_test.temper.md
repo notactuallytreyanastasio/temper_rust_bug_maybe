@@ -1,24 +1,24 @@
 # repro_test
 
 ```temper
-import { renderItems, FooItem, BarItem } from "../repro";
+let { renderItems, FooItem, BarItem, Item } = import("..");
 
-export test "renderItems formats mixed items" {
+test("renderItems formats mixed items") {
   let items = [
-    new FooItem("hello") ~~ Item,
-    new BarItem(42) ~~ Item,
-    new FooItem("world") ~~ Item,
+    new FooItem("hello") as Item,
+    new BarItem(42) as Item,
+    new FooItem("world") as Item,
   ];
-  assert renderItems(items) == "[hello, bar:42, world]";
+  assert(renderItems(items) == "[hello, bar:42, world]");
 }
 
-export test "renderItems handles empty list" {
+test("renderItems handles empty list") {
   let items: List<Item> = [];
-  assert renderItems(items) == "[]";
+  assert(renderItems(items) == "[]");
 }
 
-export test "renderItems single item no comma" {
-  let items = [new FooItem("only") ~~ Item];
-  assert renderItems(items) == "[only]";
+test("renderItems single item no comma") {
+  let items = [new FooItem("only") as Item];
+  assert(renderItems(items) == "[only]");
 }
 ```

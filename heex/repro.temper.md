@@ -4,15 +4,15 @@ Minimal reproduction of the Temper Rust backend codegen bug.
 The pattern `var` + `for` + `when` triggers two Rust compile errors.
 
 ```temper
-interface Item {
+export interface Item {
   label(): String;
 }
 
-class FooItem(public name: String) extends Item {
+export class FooItem(public name: String) extends Item {
   public label(): String { name }
 }
 
-class BarItem(public value: Int) extends Item {
+export class BarItem(public value: Int) extends Item {
   public label(): String { "${value}" }
 }
 
