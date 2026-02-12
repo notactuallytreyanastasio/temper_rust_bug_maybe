@@ -1,24 +1,24 @@
 # repro_test
 
 ```temper
-let { renderItems, FooItem, BarItem, Item } = import("..");
+let { formatItem, FooItem, BarItem, Item } = import("..");
 
-test("renderItems formats mixed items") {
-  let items = [
-    new FooItem("hello") as Item,
-    new BarItem(42) as Item,
-    new FooItem("world") as Item,
-  ];
-  assert(renderItems(items) == "[hello, bar:42, world]");
+test("formatItem FooItem with extras uses comma separator") {
+  let extras = new ListBuilder<String>();
+  extras.add("x");
+  extras.add("y");
+  extras.add("z");
+  assert(formatItem(new FooItem("hello"), extras.toList()) == "hellox,y,z");
 }
 
-test("renderItems handles empty list") {
-  let items: List<Item> = [];
-  assert(renderItems(items) == "[]");
+test("formatItem FooItem with no extras") {
+  let extras = new ListBuilder<String>();
+  assert(formatItem(new FooItem("hello"), extras.toList()) == "hello");
 }
 
-test("renderItems single item no comma") {
-  let items = [new FooItem("only") as Item];
-  assert(renderItems(items) == "[only]");
+test("formatItem BarItem ignores extras") {
+  let extras = new ListBuilder<String>();
+  extras.add("ignored");
+  assert(formatItem(new BarItem(42), extras.toList()) == "bar:42");
 }
 ```

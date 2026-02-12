@@ -2,66 +2,90 @@
 
 ## The Bug
 
-When Temper compiles to Rust, mutable variables (`var`) used inside `for`
-loops inside `when` (pattern-match) blocks produce invalid Rust code that
-fails with two classes of errors:
+When Temper compiles to Rust, mutable variables (`var`) declared **inside a
+`when` branch** (a `NestingStatement`) and captured by a `for` loop (which
+becomes a closure) within that branch produce invalid Rust code.
 
-### Error 1: E0434 — `fn` items capture outer mutable variables
+### Root Cause
 
-Temper's Rust codegen emits `fn` items inside function bodies for `when`
-branches. These `fn` items reference the outer mutable variable `first`,
-but Rust `fn` items cannot capture variables from their enclosing scope.
-Only closures can do that.
+In `TmpLHelpers.kt`, `varsDeclared()` skipped `NestingStatement` nodes (when
+blocks, if/else, while loops), but `functionsDeclared()` did NOT skip them.
+This asymmetry caused `mutableCaptures()` to:
+- **Find** closures inside when branches (via `functionsDeclared()`)
+- **Miss** the mutable variables they capture (via `varsDeclared()`)
 
-**Generated (wrong):**
-```rust
-fn when_branch_0(first: &bool, out: &mut StringBuilder, item: &FooItem) {
-    // ...references `first` from outer scope...
-}
-```
+When a variable isn't detected as a mutable capture, the Rust backend declares
+it as a plain type (`bool`), but the closure still generates `Arc<RwLock<bool>>`
+access patterns — causing E0308 type mismatches and E0434 fn-item capture errors.
 
-**Expected:** Either use closures, or pass the variable explicitly without
-generating `fn` items that reference outer scope.
+### Key Detail: Where `var` Is Declared Matters
 
-### Error 2: E0308 — Type mismatch with `Arc<RwLock<T>>`
-
-Temper wraps mutable variables in `Arc<RwLock<bool>>` for the outer scope,
-but in the `when`-block branch functions it emits `&bool` parameter types
-instead of `&Arc<RwLock<bool>>`, causing a type mismatch.
-
-**Generated (wrong):**
-```rust
-// Outer scope:
-let first: Arc<RwLock<bool>> = Arc::new(RwLock::new(true));
-
-// When-branch fn:
-fn branch(first: &bool, ...) { ... }
-//               ^^^^^ should be &Arc<RwLock<bool>>
-```
-
-## Triggering Pattern
-
-The minimal pattern that triggers both bugs is `var` + `for` + `when`:
+The bug only triggers when `var` is declared **inside** a `when` branch:
 
 ```temper
-export let renderItems(items: List<Item>): String {
-  var first = true;           // <-- mutable variable
-  for (let item of items) {   // <-- for loop
-    if (!first) { ... }
+// DOES trigger the bug — var inside when branch
+let f(item: Item, extras: List<String>): String {
+  when (item) {
+    is FooItem -> do {
+      var first = true;          // <-- inside NestingStatement
+      for (let e of extras) {    // <-- closure captures first
+        first = false;
+      }
+    };
+  }
+}
+
+// Does NOT trigger — var at function body level
+let g(items: List<Item>): String {
+  var first = true;              // <-- at function body level (found without nesting)
+  for (let item of items) {
     first = false;
-    when (item) {             // <-- when pattern match
-      is FooItem -> ...;
-      is BarItem -> ...;
-      else -> ...;
-    }
+    when (item) { ... }
   }
 }
 ```
 
-Any one of these removed makes the bug disappear:
-- Remove `var first` (no mutable variable) — compiles fine
-- Remove `when` (no pattern match) — compiles fine
-- Remove `for` (no loop) — compiles fine
+### Error 1: E0434 — `fn` items capture outer mutable variables
+
+```
+error[E0434]: can't capture dynamic environment in a fn item
+   --> src/mod.rs:107:17
+    |
+107 |                 first__27 = false;
+    |                 ^^^^^^^^^
+    |
+    = help: use the `|| { ... }` closure form instead
+```
+
+### Error 2: E0308 — Type mismatch with `Arc<RwLock<T>>`
+
+```
+error[E0308]: mismatched types
+   --> src/mod.rs:104:48
+    |
+104 |                 if ! temper_core::read_locked( & self.first__27) {
+    |                                                ^^^^^^^^^^^^^^^^ expected `&Arc<RwLock<bool>>`, found `&bool`
+```
+
+## Fix
+
+The fix in `temperlang/temper` adds an `includeNesting` parameter to
+`varsDeclared()` and passes it from `mutableCaptures()`, so mutable variables
+inside `when` branches are correctly detected as captures.
+
+See: [temperlang/temper#328](https://github.com/temperlang/temper/issues/328)
+
+## Build Instructions
+
+```bash
+# These all work fine (bug is Rust-specific):
+temper test -b js
+temper test -b py
+temper test -b lua
+
+# This fails on unfixed temper, passes on fixed:
+temper test -b rust
+```
 
 ## Files
 
@@ -69,22 +93,4 @@ Any one of these removed makes the bug disappear:
 |------|---------|
 | `heex/config.temper.md` | Package configuration |
 | `heex/repro.temper.md` | Minimal code triggering the bug |
-| `heex/tests/repro_test.temper.md` | Tests (pass on JS/Py/Lua, fail to compile on Rust) |
-
-## Build Instructions
-
-```bash
-# These all work fine:
-temper build -b js
-temper build -b py
-temper build -b lua
-
-# This fails with 13+ errors (E0434, E0308):
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 temper build -b rust
-```
-
-## Environment
-
-- Temper: latest (as of 2026-02-11)
-- Rust: stable
-- macOS (Apple Silicon)
+| `heex/tests/repro_test.temper.md` | Tests (pass on JS/Py/Lua, fail to compile on unfixed Rust) |
